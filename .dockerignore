@@ -1,0 +1,37 @@
+# ---- 版本控制与 IDE ----
+.git
+.gitignore
+.dockerignore
+.idea
+.vscode
+.DS_Store
+
+# ---- 依赖与构建产物（镜像内重新构建/安装）----
+node_modules
+dist
+dist-ssr
+.tmp
+.venv
+__pycache__/
+
+# ---- 站点凭据：绝不打进镜像（运行时用 volume 挂载注入）----
+config/sites.json
+
+# ---- 运行时生成物：由桥接/sync 在运行时写入（挂载卷持久化）----
+public/sites.json
+public/channels/
+
+# ---- WorkBuddy 记忆 / 文档 / 测试脚本（不进运行时镜像）----
+.workbuddy/
+README.md
+*.md
+.env
+.env.*
+
+# ---- 测试与开发脚本（镜像只需 dev_bridge.py 与 sync_channels.py）----
+scripts/__pycache__/
+scripts/validate_queries.mjs
+scripts/ssr_smoke.js
+scripts/test_sql.py
+scripts/verify_datasource.py
+scripts/verify_mysql.py

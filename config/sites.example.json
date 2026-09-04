@@ -1,0 +1,40 @@
+{
+  "sites": [
+    {
+      "id": "main",
+      "name": "主站",
+      "ch": {
+        "host": "ch.example.com",
+        "port": 9000,
+        "user": "default",
+        "password": "<CLICKHOUSE_PASSWORD>",
+        "database": "new_api_logs"
+      },
+      "mysql": {
+        "host": "mysql.example.com",
+        "port": 3306,
+        "user": "root",
+        "password": "<MYSQL_PASSWORD>",
+        "database": "oneapi-master"
+      }
+    },
+    {
+      "id": "site2",
+      "name": "站点二",
+      "ch": {
+        "host": "ch2.example.com",
+        "port": 9000,
+        "user": "default",
+        "password": "<CLICKHOUSE_PASSWORD>",
+        "database": "new_api_logs"
+      },
+      "mysql": {
+        "host": "mysql2.example.com",
+        "port": 3306,
+        "user": "root",
+        "password": "<MYSQL_PASSWORD>",
+        "database": "oneapi-master"
+      }
+    }
+  ]
+}

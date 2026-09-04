@@ -1,0 +1,22 @@
+services:
+  board:
+    build: .
+    image: channel-board:latest
+    container_name: channel-board
+    restart: unless-stopped
+    ports:
+      - "8080:80"            # 宿主机 8080 -> 容器 nginx 80（按需改）
+    environment:
+      # 访问令牌：留空 = 不启用认证；设为非空即启用（前端自动弹登录框）
+      # 建议用 .env 文件管理：echo 'BOARD_TOKEN=你的令牌' > .env
+      BOARD_TOKEN: ${BOARD_TOKEN:-}
+      TZ: Asia/Shanghai
+    volumes:
+      # 站点配置（含 CH/MySQL 凭据，不入镜像，热加载）
+      # 首次部署：cp config/sites.example.json config/sites.json 后填入真实凭据
+      - ./config:/app/config
+      # 渠道映射 + 站点索引（桥接/sync 运行时生成，持久化到宿主机）
+      - ./public:/app/public
+    # 内网部署可关闭端口映射，仅在宿主机 nginx 层反代到本容器 80
+    # expose:
+    #   - "80"
