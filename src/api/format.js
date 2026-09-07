@@ -5,6 +5,16 @@ export function fmtNum(v, digits = 0) {
   return Number(v).toLocaleString('zh-CN', { maximumFractionDigits: digits })
 }
 
+// 大数缩写：>=1B 用 B、>=1M 用 M、>=1K 用 K，否则原样
+export function fmtBigNum(v) {
+  if (v === null || v === undefined || v === '' || Number.isNaN(v)) return '-'
+  const n = Number(v)
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B'
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M'
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K'
+  return n.toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+}
+
 export function fmtPct(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return '-'
   return Number(v).toFixed(2) + '%'

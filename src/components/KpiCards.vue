@@ -1,7 +1,7 @@
 <script setup>
-// KPI 指标卡 ×7（含环比）
+// KPI 指标卡 ×8（含环比）
 import { computed } from 'vue'
-import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, deltaOf } from '../api/format.js'
+import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum, deltaOf } from '../api/format.js'
 
 const props = defineProps({
   kpi: { type: Object, default: null },
@@ -55,6 +55,18 @@ const cards = computed(() => {
       delta: sub(k.cache_rate, p.cache_rate, true),
     },
     {
+      label: 'Token 用量',
+      kind: 'tokens',
+      value: fmtBigNum(k.total_tok),
+      delta: sub(k.total_tok, p.total_tok, true),
+      tokens: [
+        { label: '缓存', val: fmtBigNum(k.cache_tok) },
+        { label: '输入', val: fmtBigNum(k.input_tok) },
+        { label: '输出', val: fmtBigNum(k.output_tok) },
+        { label: '总', val: fmtBigNum(k.total_tok) },
+      ],
+    },
+    {
       label: '报错数',
       value: fmtNum(k.err_cnt),
       sub2: '最终失败请求',
@@ -66,12 +78,24 @@ const cards = computed(() => {
 
 <template>
   <div class="grid-kpi">
-    <div v-for="c in cards" :key="c.label" class="kpi-card" :class="{ 'up-is-bad': false }">
+    <div v-for="c in cards" :key="c.label" class="kpi-card" :class="{ 'kpi-card-wide': c.kind === 'tokens' }">
       <div class="k-label">{{ c.label }}</div>
       <div class="k-value">{{ c.value }}</div>
-      <div class="k-sub">
+      <!-- Token 大卡：2×2 子数字（缓存/输入/输出/总） -->
+      <div v-if="c.kind === 'tokens'" class="k-tokens">
+        <div v-for="t in c.tokens" :key="t.label">
+          <span class="tk-label">{{ t.label }}</span>
+          <span class="tk-val">{{ t.val }}</span>
+        </div>
+      </div>
+      <div v-else class="k-sub">
         <span v-if="c.delta" :class="c.delta.cls">{{ c.delta.text }}</span>
         <span>{{ c.sub2 }}</span>
+      </div>
+      <!-- Token 大卡环比独立显示在底部 -->
+      <div v-if="c.kind === 'tokens'" class="k-sub k-sub-extra">
+        <span v-if="c.delta" :class="c.delta.cls">{{ c.delta.text }}</span>
+        <span>环比</span>
       </div>
     </div>
   </div>

@@ -88,7 +88,12 @@ SELECT
   ${safe('round(avgIf(use_time_s, ok), 2)', 'countIf(ok)')} AS avg_use_time,
   ${safe('round(sumIf(cache_tokens, ok) / sumIf(prompt_tokens, ok) * 100, 2)', 'sumIf(prompt_tokens, ok)')} AS cache_rate,
   countIf(NOT ok) AS err_cnt,
-  countIf(try_cnt > 1) AS retried_cnt
+  countIf(try_cnt > 1) AS retried_cnt,
+  -- Token 用量（仅最终成功请求；cache 是输入 token 的子集，单独展示）
+  sumIf(cache_tokens, ok) AS cache_tok,
+  sumIf(prompt_tokens, ok) AS input_tok,
+  sumIf(completion_tokens, ok) AS output_tok,
+  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok
 FROM reqs
 ${outerWhere(f)}`
 }
@@ -143,7 +148,11 @@ SELECT
   ${safe('round(avgIf(use_time_s, ok), 2)', 'countIf(ok)')} AS avg_use_time,
   ${safe('round(sumIf(cache_tokens, ok) / sumIf(prompt_tokens, ok) * 100, 2)', 'sumIf(prompt_tokens, ok)')} AS cache_rate,
   countIf(NOT ok) AS err_cnt,
-  countIf(try_cnt > 1) AS retried_cnt
+  countIf(try_cnt > 1) AS retried_cnt,
+  sumIf(cache_tokens, ok) AS cache_tok,
+  sumIf(prompt_tokens, ok) AS input_tok,
+  sumIf(completion_tokens, ok) AS output_tok,
+  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok
 FROM reqs
 ${outerWhere(f)}
 GROUP BY dim ORDER BY total DESC`

@@ -1,7 +1,7 @@
 <script setup>
 // 维度明细表：按分组依据聚合，可排序，点击行下钻
 import { ref, computed } from 'vue'
-import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec } from '../api/format.js'
+import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum } from '../api/format.js'
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
@@ -24,6 +24,10 @@ const COLS = [
   { key: 'avg_use_time', label: '平均耗时', fmt: (v) => fmtSec(v) },
   { key: 'cache_rate', label: '缓存率', fmt: (v) => fmtPct(v) },
   { key: 'retried_cnt', label: '重试数', fmt: (v) => fmtNum(v) },
+  { key: 'cache_tok', label: '缓存 tok', fmt: (v) => fmtBigNum(v) },
+  { key: 'input_tok', label: '输入 tok', fmt: (v) => fmtBigNum(v) },
+  { key: 'output_tok', label: '输出 tok', fmt: (v) => fmtBigNum(v) },
+  { key: 'total_tok', label: '总 tok', fmt: (v) => fmtBigNum(v) },
 ]
 
 const sorted = computed(() => {
