@@ -13,12 +13,14 @@ new-api 网关渠道监控仪表盘（Vue3 + ECharts 前端应用，数据源为
 | TPS | Σ输出token ÷ Σ生成时长（生成时长 = use_time×1000 − FRT，非流式 = use_time×1000），加权平均 |
 | 平均耗时 | use_time（秒）均值 |
 | 缓存命中率 | Σcache_tokens ÷ Σ输入token |
+| 消费金额 | Σquota（仅最终成功请求）÷ 站点 `quota_per_unit`；new-api 默认 500000（即 $1 = 500000 quota） |
 | 报错 | 最终失败请求；按 error_type / status_code 分布 |
 | 重试数 | other.admin_info.use_channel 数组长度 > 1 的请求数 |
 
 - 请求归属渠道：成功 → 最终成功方 channel_id；失败 → 最后一次尝试的 channel_id
 - use_time 为秒级精度（new-api 原生），TPS 计算在秒边界可能有小误差
 - 渠道名称来自 MySQL channels 表（`scripts/sync_channels.py` 按站点生成 `public/channels/<site>.json`），渠道变更后重新执行
+- 消费金额取自 `logs.quota` 列。若某站点的表没有 `quota` 列，前端启动探测会自动降级为 0，不会导致整条查询失败
 
 ## 多站点配置
 
@@ -30,6 +32,8 @@ new-api 网关渠道监控仪表盘（Vue3 + ECharts 前端应用，数据源为
     {
       "id": "main",
       "name": "主站",
+      "quota_per_unit": 500000,
+      "currency": "$",
       "ch":     { "host": "...", "port": 9000, "user": "...", "password": "...", "database": "new_api_logs" },
       "mysql":  { "host": "...", "port": 3306, "user": "...", "password": "...", "database": "oneapi-master" }
     },
@@ -37,6 +41,9 @@ new-api 网关渠道监控仪表盘（Vue3 + ECharts 前端应用，数据源为
   ]
 }
 ```
+
+`quota_per_unit` / `currency`（可选）：金额换算。1 个货币单位 = 多少 quota，new-api 默认 `500000`。
+若想按人民币展示，把它改成 `500000 / 汇率`（例如 7.2 → `69444`），`currency` 填 `¥`。
 
 ### 可视化管理（推荐）
 
@@ -65,11 +72,60 @@ python scripts/sync_channels.py --site site2   # 只同步某个站点
 | DELETE | `/sites/<id>` | 删除站点 |
 | POST | `/sites/test` | 测试 CH/MySQL 连通性 |
 | POST | `/sites/<id>/sync` | 同步该站点渠道映射 |
+| GET | `/sites/export` | 全量导出（**含明文凭据**，用于迁移/备份） |
+| POST | `/sites/import` | 导入站点：`{"sites":[...],"mode":"merge\|replace"}` |
 
 - 桥接服务按请求头 `X-Site` 路由到对应站点的 CH，**无需重启**（凭据只在服务端，浏览器不接触）
 - 前端站点列表优先从 `/sites` 实时读取，失败回退 `public/sites.json`；当前站点记在 localStorage，切换即重置筛选并重载
 - 未带 `X-Site` 头的请求默认路由到第一个站点（向后兼容）
 - `dev_bridge.py` 缺少 config/sites.json 时回退到环境变量单站点（CH_HOST 等旧变量仍有效）
+
+### 配置持久化与迁移（更新镜像不重填）
+
+站点配置只存在 **`config/sites.json`** 一个文件里，因此能不能扛住"更新镜像"取决于这个文件在宿主机上：
+
+| 部署方式 | 是否持久化 | 说明 |
+|----------|-----------|------|
+| docker compose（本项目 `docker-compose.yml`） | ✅ | `./config:/app/config` + `./public:/app/public` 绑定挂载，删除/重建容器不丢 |
+| `docker run` 带 `-v $(pwd)/config:/app/config` | ✅ | 同理，必须显式挂载 |
+| `docker run` 不带 `-v` | ❌ | 数据在容器内（匿名卷），换容器即丢 |
+
+保护机制（已内置，无需配置）：
+
+- **自动备份**：每次写 `config/sites.json` 前，把上一版复制为 `config/sites.json.bak`
+- **自动恢复**：启动时若 `sites.json` 不存在但 `.bak` 在，自动从备份恢复
+- **环境变量初始化**：`SITES_JSON='{"sites":[...]}'`，仅在建不到文件时写入一次（已有文件优先，绝不覆盖）
+- **界面导出/导入**：站点下拉菜单底部 →「导出配置 / 导入配置」，导出为含凭据的 JSON，新环境导入即可（合并或全量替换）
+
+迁移到新服务器 / 更新镜像前的标准动作：
+
+```bash
+# 0) 先确认容器是否真的挂载了配置目录（MISSING 就说明没挂载，配置只在容器里）
+docker inspect channel-board --format '{{json .Mounts}}' | grep -o '/app/config'
+
+# 1) 没挂载时，先从旧容器把文件捞出来
+docker cp channel-board:/app/config/sites.json ./sites.json
+
+# 2) 前端导出（推荐，含凭据）：站点下拉 → 导出配置
+# 3) 或直接拷宿主机文件
+cp config/sites.json /path/to/backup/sites-$(date +%F).json
+```
+
+```bash
+# 命令行方式（走桥接端点）
+curl -H "X-Board-Token: $BOARD_TOKEN" http://127.0.0.1:8123/sites/export -o sites-backup.json
+curl -X POST -H "X-Board-Token: $BOARD_TOKEN" -H 'Content-Type: application/json' \
+     --data-binary @sites-backup.json http://127.0.0.1:8123/sites/import
+```
+
+## 筛选与刷新
+
+筛选条件（时间范围/快捷时段/渠道/Key/用户/模型/令牌/分组/分组依据）**改动后不会自动查询**——连续调整多项时不会被中途打断。
+
+- 有未应用的改动时，右下角刷新按钮会高亮并显示 `刷新 •`，旁边提示「筛选已修改，点击刷新应用」
+- 点击 **刷新** 才真正发起查询
+- 切站点、登录、保存站点配置属于显式动作，会自动重载数据
+- 表格行下钻同样是"改筛选"，需点刷新生效
 
 ## 访问令牌认证
 
@@ -139,6 +195,16 @@ docker run -d --name channel-board \
 ```
 
 需启用访问令牌时追加 `-e BOARD_TOKEN=你的令牌`。
+
+> ⚠️ **更新镜像前务必确认这两个 `-v` 挂载**。少了挂载，站点配置只活在容器里，换镜像/重建容器就得重填。
+> 已有数据时可以在旧容器里先导出：站点下拉 →「导出配置」。
+
+若不方便挂载文件，也可以把站点配置放进环境变量（compose 的 `.env` 或 `-e SITES_JSON='...'`），
+仅在 `config/sites.json` 不存在时用于初始化，之后仍以文件为准：
+
+```bash
+SITES_JSON='{"sites":[{"id":"main","name":"主站","ch":{"host":"1.2.3.4","port":9000,"user":"default","password":"xxx","database":"new_api_logs"}}]}'
+```
 
 ### 5. GitHub Actions 自动构建镜像（可选）
 

@@ -15,6 +15,9 @@ const isEdit = computed(() => props.mode === 'edit')
 const form = reactive({
   id: props.site?.id || '',
   name: props.site?.name || '',
+  // 金额换算：1 货币单位 = 多少 quota（new-api QuotaPerUnit，默认 500000）
+  quota_per_unit: props.site?.quota_per_unit ?? 500000,
+  currency: props.site?.currency || '$',
   ch: { host: props.site?.ch?.host || '', port: props.site?.ch?.port || 9000, user: props.site?.ch?.user || '', password: '', database: props.site?.ch?.database || 'new_api_logs' },
   mysql: { host: props.site?.mysql?.host || '', port: props.site?.mysql?.port || 3306, user: props.site?.mysql?.user || '', password: '', database: props.site?.mysql?.database || '' },
 })
@@ -28,9 +31,12 @@ const testResult = ref(null)
 
 function buildSite() {
   const chPort = parseInt(form.ch.port, 10)
+  const qpu = parseInt(form.quota_per_unit, 10)
   const site = {
     id: form.id.trim(),
     name: form.name.trim(),
+    quota_per_unit: Number.isFinite(qpu) && qpu > 0 ? qpu : 500000,
+    currency: (form.currency || '').trim() || '$',
     ch: {
       host: form.ch.host.trim(),
       port: Number.isFinite(chPort) ? chPort : 9000,
@@ -138,6 +144,17 @@ async function save() {
         <input type="text" v-model="form.mysql.database" placeholder="oneapi-master" />
       </div>
 
+      <div class="fieldset-title">金额换算（可选）</div>
+      <div class="row">
+        <label>每单位 quota</label>
+        <input type="text" v-model="form.quota_per_unit" placeholder="500000" />
+        <label class="mini">货币符号</label>
+        <input type="text" v-model="form.currency" style="width: 80px" placeholder="$" />
+      </div>
+      <div class="hint-line">
+        new-api 默认 QuotaPerUnit = 500000（$1 = 500000 quota）。消费金额 = 额度 ÷ 该值，仅影响展示。
+      </div>
+
       <div class="test-box" v-if="testResult">
         <div class="test-line">
           <span>ClickHouse</span>
@@ -163,6 +180,7 @@ async function save() {
 .fieldset-title { font-size: 12px; color: var(--text2); font-weight: 600; margin: 14px 0 8px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .mini { width: auto; margin-left: 8px; }
 .test-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 4px; font-size: 13px; }
+.hint-line { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.5; }
 .test-line { display: flex; justify-content: space-between; padding: 3px 0; }
 .test-line .ok { color: var(--good); }
 .test-line .bad { color: var(--bad); }

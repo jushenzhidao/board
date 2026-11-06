@@ -10,6 +10,13 @@
     DELETE /sites/<id>       -> 删除站点
     POST   /sites/test       -> 测试站点 CH/MySQL 连通性（body: {"site": {...}}）
     POST   /sites/<id>/sync  -> 同步该站点渠道映射（调 sync_channels.py）
+    GET    /sites/export     -> 全量导出站点（含明文凭据，用于迁移/备份）
+    POST   /sites/import     -> 导入站点（body: {"sites":[...], "mode":"merge|replace"}）
+
+持久化说明:
+    - config/sites.json 是唯一数据源；每次写入前自动备份到 sites.json.bak
+    - 文件缺失时先尝试从 .bak 恢复，其次用 SITES_JSON 环境变量初始化
+    - 容器部署时请把 /app/config 与 /app/public 挂到宿主机（见 docker-compose.yml）
 
 用法:
     python scripts/dev_bridge.py
@@ -24,6 +31,7 @@ import json
 import math
 import os
 import re
+import shutil
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -73,6 +81,49 @@ def _env_fallback_site():
     ]
 
 
+def _restore_sites_from_bak():
+    """sites.json 丢失（挂载目录被清空/误删）但有 .bak 时自动恢复。"""
+    if os.path.exists(SITES_PATH):
+        return
+    bak = SITES_PATH + ".bak"
+    if not os.path.exists(bak):
+        return
+    try:
+        with open(bak, encoding="utf-8") as f:
+            if not (json.load(f).get("sites")):
+                return
+        shutil.copyfile(bak, SITES_PATH)
+        print("[dev_bridge] 未找到 sites.json，已从 sites.json.bak 自动恢复")
+    except Exception as e:
+        print(f"[dev_bridge] 从 .bak 恢复站点配置失败：{e}")
+
+
+def _seed_sites_from_env():
+    """容器/服务器首次启动时，若 config/sites.json 不存在，可用 SITES_JSON 环境变量
+    初始化（内容为 {"sites":[...]} 或直接数组）。这样站点配置可以放在 compose/.env 里，
+    重建容器/更新镜像都不会丢，无需重填。已存在的文件优先，绝不被 env 覆盖。"""
+    _restore_sites_from_bak()
+    if os.path.exists(SITES_PATH):
+        return
+    seed = os.environ.get("SITES_JSON", "").strip()
+    if not seed:
+        return
+    try:
+        data = json.loads(seed)
+        sites = data.get("sites") if isinstance(data, dict) else data
+        if not isinstance(sites, list) or not sites:
+            raise ValueError("SITES_JSON 里没有有效站点")
+        os.makedirs(os.path.dirname(SITES_PATH), exist_ok=True)
+        tmp = SITES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"sites": sites}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, SITES_PATH)
+        print(f"[dev_bridge] 已用 SITES_JSON 环境变量初始化站点配置（{len(sites)} 个）")
+    except Exception as e:
+        print(f"[dev_bridge] SITES_JSON 解析失败，忽略：{e}")
+
+
+_seed_sites_from_env()
 SITES = _load_from_file() or _env_fallback_site()
 SITES_BY_ID = {s["id"]: s for s in SITES}
 DEFAULT_SITE_ID = SITES[0]["id"]
@@ -103,9 +154,15 @@ def reload_sites_if_changed():
 
 
 def _write_sites(sites):
-    """原子写回 sites.json 并同步内存态（调用方需已持有 _sites_lock）。"""
+    """原子写回 sites.json 并同步内存态（调用方需已持有 _sites_lock）。
+    写前保留上一版到 sites.json.bak —— 误删/误改站点后可直接回滚。"""
     global SITES, SITES_BY_ID, DEFAULT_SITE_ID, _sites_mtime
     os.makedirs(os.path.dirname(SITES_PATH), exist_ok=True)
+    if os.path.exists(SITES_PATH):
+        try:
+            shutil.copyfile(SITES_PATH, SITES_PATH + ".bak")
+        except OSError as e:
+            print(f"[dev_bridge] 备份 sites.json 失败（继续写入）：{e}")
     tmp = SITES_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"sites": sites}, f, ensure_ascii=False, indent=2)
@@ -189,6 +246,13 @@ def _validate_site(site):
             int(mysql.get("port"))
         except (TypeError, ValueError):
             return "MySQL 端口必须是数字"
+    qpu = site.get("quota_per_unit")
+    if qpu not in (None, ""):
+        try:
+            if int(qpu) <= 0:
+                return "每单位 quota（quota_per_unit）必须大于 0"
+        except (TypeError, ValueError):
+            return "每单位 quota（quota_per_unit）必须是数字"
     return None
 
 
@@ -360,6 +424,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/sites/export":
+            # 全量导出（含明文凭据）：用于迁移/备份。请只在受信网络使用。
+            reload_sites_if_changed()
+            body = json.dumps(
+                {
+                    "version": 1,
+                    "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "sites": SITES,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            self._log_req("GET", status=200, extra=f" export={len(SITES)}")
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", "application/json; charset=UTF-8")
+            self.send_header("Content-Disposition", 'attachment; filename="sites.json"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path.startswith("/sites/"):
             reload_sites_if_changed()
             site_id = unquote(path[len("/sites/"):])
@@ -383,6 +467,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/sites/test":
             self._log_req("POST")
             self._handle_test_site()
+            return
+        if path == "/sites/import":
+            self._log_req("POST")
+            self._handle_import_sites()
             return
         if path.startswith("/sites/") and path.endswith("/sync"):
             self._log_req("POST")
@@ -482,6 +570,51 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[dev_bridge] 清理渠道映射文件失败：{e}")
         print(f"[dev_bridge] 站点已删除：{site_id}（剩余 {len(sites)} 个）")
         self._send_json(200, {"ok": True})
+
+    def _handle_import_sites(self):
+        """导入站点配置（含凭据）。mode=merge（默认，同 id 覆盖、新 id 追加）或 replace（整表替换）。
+        用于「更新镜像/换机器后不重填站点」：先导出备份，再在新环境导入。"""
+        payload = _parse_json_body(self)
+        if not isinstance(payload, dict):
+            self._send_json(400, {"error": "请求体必须是 JSON 对象"})
+            return
+        sites = payload.get("sites")
+        if not isinstance(sites, list) or not sites:
+            self._send_json(400, {"error": "缺少 sites 数组"})
+            return
+        mode = (payload.get("mode") or "merge").lower()
+        if mode not in ("merge", "replace"):
+            self._send_json(400, {"error": "mode 只能是 merge 或 replace"})
+            return
+        cleaned = []
+        for i, s in enumerate(sites):
+            err = _validate_site(s)
+            if err:
+                self._send_json(400, {"error": f"第 {i + 1} 个站点无效：{err}"})
+                return
+            cleaned.append(s)
+        added = updated = 0
+        with _sites_lock:
+            if mode == "replace":
+                final = [_merge_secrets(s, SITES_BY_ID.get(s["id"])) for s in cleaned]
+                added = len(final)
+            else:
+                final = list(SITES)
+                index = {s["id"]: i for i, s in enumerate(final)}
+                for s in cleaned:
+                    s2 = _merge_secrets(s, SITES_BY_ID.get(s["id"]))
+                    if s["id"] in index:
+                        final[index[s["id"]]] = s2
+                        updated += 1
+                    else:
+                        index[s["id"]] = len(final)
+                        final.append(s2)
+                        added += 1
+            _write_sites(final)
+        print(f"[dev_bridge] 站点导入完成：mode={mode} 新增={added} 更新={updated} 共={len(final)}")
+        self._send_json(200, {
+            "ok": True, "mode": mode, "added": added, "updated": updated, "total": len(final),
+        })
 
     def _handle_test_site(self):
         payload = _parse_json_body(self)

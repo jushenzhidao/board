@@ -6,7 +6,7 @@ const props = defineProps({
   sites: { type: Array, default: () => [] },
   value: { type: String, default: '' },
 })
-const emit = defineEmits(['change', 'add', 'edit', 'delete'])
+const emit = defineEmits(['change', 'add', 'edit', 'delete', 'export', 'import'])
 
 const open = ref(false)
 const root = ref(null)
@@ -48,6 +48,10 @@ function pick(s) {
       </div>
       <div class="ss-foot">
         <button type="button" class="add" @click="close(); emit('add')">＋ 新增站点</button>
+        <div class="ss-tools">
+          <button type="button" title="下载含凭据的站点配置，用于迁移/备份" @click="close(); emit('export')">导出配置</button>
+          <button type="button" title="从备份文件恢复站点配置" @click="close(); emit('import')">导入配置</button>
+        </div>
       </div>
     </div>
   </div>
@@ -94,4 +98,11 @@ function pick(s) {
   color: var(--accent); border-radius: 6px; padding: 6px 0; font-size: 13px; cursor: pointer;
 }
 .add:hover { background: var(--accent-weak); border-color: var(--accent); }
+
+.ss-tools { display: flex; gap: 6px; margin-top: 6px; }
+.ss-tools button {
+  flex: 1; border: 1px solid var(--border); background: #fff; color: var(--text2);
+  border-radius: 6px; padding: 5px 0; font-size: 12px; cursor: pointer;
+}
+.ss-tools button:hover { border-color: var(--accent); color: var(--accent); }
 </style>

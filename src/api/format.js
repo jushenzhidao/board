@@ -20,6 +20,28 @@ export function fmtPct(v) {
   return Number(v).toFixed(2) + '%'
 }
 
+// 消费金额：new-api 的 quota（额度）按 QuotaPerUnit 换算成货币。
+// quotaPerUnit = 1 个货币单位等于多少 quota（new-api 默认 500000，即 $1 = 500000）。
+export function toMoney(quota, perUnit = 500000) {
+  if (quota === null || quota === undefined || quota === '') return null
+  const n = Number(quota)
+  const u = Number(perUnit)
+  if (!Number.isFinite(n) || !Number.isFinite(u) || u <= 0) return null
+  return n / u
+}
+
+export function fmtMoney(quota, perUnit = 500000, symbol = '$') {
+  const v = toMoney(quota, perUnit)
+  if (v === null) return '-'
+  const abs = Math.abs(v)
+  // 金额较小时多留 2 位，避免「$0.00」看不出消耗
+  const digits = abs > 0 && abs < 1 ? 4 : 2
+  return (
+    symbol +
+    v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  )
+}
+
 export function fmtMs(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return '-'
   const n = Number(v)

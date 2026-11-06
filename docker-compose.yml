@@ -11,6 +11,10 @@ services:
       # 建议用 .env 文件管理：echo 'BOARD_TOKEN=你的令牌' > .env
       BOARD_TOKEN: ${BOARD_TOKEN:-}
       TZ: Asia/Shanghai
+      # 可选：首次启动且 ./config/sites.json 不存在时，用它初始化站点配置。
+      # 内容为 {"sites":[...]} 的 JSON 字符串（整行放 .env）。已有文件优先，不会被覆盖。
+      # 好处：配置留在宿主机 .env 里，重建容器 / 拉新镜像都不会丢。
+      SITES_JSON: ${SITES_JSON:-}
     volumes:
       # 站点配置（含 CH/MySQL 凭据，不入镜像，热加载）
       # 首次部署：cp config/sites.example.json config/sites.json 后填入真实凭据

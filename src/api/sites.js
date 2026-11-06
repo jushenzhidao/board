@@ -58,3 +58,17 @@ export async function testSite(site) {
 export async function syncSite(id) {
   return await req('POST', '/sites/' + encodeURIComponent(id) + '/sync')
 }
+
+/** 导出全部站点配置（含明文凭据，用于迁移/备份） */
+export async function exportSites() {
+  return await req('GET', '/sites/export')
+}
+
+/**
+ * 导入站点配置
+ * @param {object} payload 导出文件内容（{sites:[...]}）
+ * @param {'merge'|'replace'} mode merge=同 id 覆盖、新 id 追加；replace=整表替换
+ */
+export async function importSites(payload, mode = 'merge') {
+  return await req('POST', '/sites/import', { sites: payload.sites || payload, mode })
+}

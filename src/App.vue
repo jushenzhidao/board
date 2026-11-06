@@ -1,8 +1,8 @@
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import dayjs from 'dayjs'
 import { chQuery, saveSettings, settings, UnauthorizedError } from './api/ch.js'
-import { listSites, deleteSite, getSite } from './api/sites.js'
+import { listSites, deleteSite, getSite, exportSites, importSites } from './api/sites.js'
 import * as sql from './api/sql.js'
 import FilterBar from './components/FilterBar.vue'
 import KpiCards from './components/KpiCards.vue'
@@ -52,6 +52,24 @@ const channelName = (id) => {
   return n ? `${n}` : null
 }
 
+// 当前站点的金额换算配置：quota_per_unit（1 货币单位 = 多少 quota）+ 货币符号。
+// new-api 默认 QuotaPerUnit = 500000（$1 = 500000 quota）；不同站点可各自配置。
+const DEFAULT_QUOTA_PER_UNIT = 500000
+const siteConf = ref({ quota_per_unit: DEFAULT_QUOTA_PER_UNIT, currency: '$' })
+async function loadSiteConf() {
+  siteConf.value = { quota_per_unit: DEFAULT_QUOTA_PER_UNIT, currency: '$' }
+  if (!site.value) return
+  try {
+    const s = await getSite(site.value)
+    if (!s) return
+    const q = Number(s.quota_per_unit)
+    siteConf.value = {
+      quota_per_unit: Number.isFinite(q) && q > 0 ? q : DEFAULT_QUOTA_PER_UNIT,
+      currency: s.currency || '$',
+    }
+  } catch { /* 读不到就按 new-api 默认值换算 */ }
+}
+
 // 多站点：优先从桥接 /sites 实时读取（支持 UI 增删改），失败回退 public/sites.json 静态索引；当前站点存 localStorage
 const sites = ref([])
 const site = ref('')
@@ -91,6 +109,7 @@ function switchSite() {
   state.tokens = []
   state.groups = []
   loadChannelMap()
+  loadSiteConf()
   refresh()
 }
 
@@ -122,7 +141,7 @@ async function onDeleteSite(s) {
   await loadSites()
   if (site.value === s.id) {
     site.value = sites.value[0]?.id || ''
-    if (site.value) { loadChannelMap(); refresh() } else { channelMap.value = {} }
+    if (site.value) { loadChannelMap(); loadSiteConf(); refresh() } else { channelMap.value = {} }
   }
 }
 
@@ -133,7 +152,60 @@ async function onSiteSaved(id) {
   if (!site.value && sites.value.length) site.value = sites.value[0].id
   saveSettings({ site: site.value })
   loadChannelMap()
+  loadSiteConf()
   refresh()
+}
+
+// ---------- 站点配置导出 / 导入（更新镜像后免重填） ----------
+async function onExportSites() {
+  try {
+    const j = await exportSites()
+    const blob = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `sites-${dayjs().format('YYYYMMDD-HHmmss')}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (e) {
+    error.value = '导出站点配置失败：' + e.message
+  }
+}
+
+function onImportSites() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json,application/json'
+  input.onchange = async () => {
+    const f = input.files && input.files[0]
+    if (!f) return
+    let payload
+    try {
+      payload = JSON.parse(await f.text())
+    } catch (e) {
+      error.value = '导入失败：不是合法的 JSON 文件（' + e.message + '）'
+      return
+    }
+    const replace = window.confirm(
+      '导入站点配置\n\n点「确定」= 全量替换（删除文件里没有的站点）\n点「取消」= 合并（同 ID 覆盖，其余保留）',
+    )
+    if (replace && !window.confirm('全量替换会删除当前多出来的站点，确定继续？')) return
+    try {
+      const r = await importSites(payload, replace ? 'replace' : 'merge')
+      await loadSites()
+      if (!site.value && sites.value.length) site.value = sites.value[0].id
+      saveSettings({ site: site.value })
+      loadChannelMap()
+      loadSiteConf()
+      refresh()
+      window.alert(`导入完成：新增 ${r.added} 个，更新 ${r.updated} 个，共 ${r.total} 个站点`)
+    } catch (e) {
+      error.value = '导入站点配置失败：' + e.message
+    }
+  }
+  input.click()
 }
 
 // 时间粒度自动：≤3h 分钟 / ≤3d 小时 / 其余 天
@@ -148,8 +220,29 @@ let seq = 0
 let refreshCtrl = null
 let loadingTimer = null
 
+// ---------- 筛选快照 / 未应用改动 ----------
+// 只有点击「刷新」（或切站点/登录/保存站点）才会查询。
+// 改动筛选后 dirty=true，刷新按钮提示用户手动应用；查询成功时把本次快照记为已应用，
+// 若查询期间用户又改了筛选，dirty 会自动保持 true，不会误清。
+function filterSnap() {
+  return JSON.stringify([
+    state.t0,
+    state.t1,
+    state.groupBy,
+    state.channels,
+    state.keys,
+    state.users,
+    state.models,
+    state.tokens,
+    state.groups,
+  ])
+}
+const appliedSnap = ref('')
+const dirty = computed(() => filterSnap() !== appliedSnap.value)
+
 async function refresh() {
   const my = ++seq
+  const mySnap = filterSnap()
   loading.value = true
   error.value = null
   if (refreshCtrl) refreshCtrl.abort()
@@ -222,6 +315,7 @@ async function refresh() {
       keys: (keysOpt.keys || []).map((k) => (Array.isArray(k) ? k[0] + ':' + k[1] : String(k))),
     }
     lastUpdated.value = dayjs().format('HH:mm:ss')
+    appliedSnap.value = mySnap
   } catch (e) {
     if (my === seq) {
       if (e.name === 'AbortError') {
@@ -285,16 +379,8 @@ async function applyAllTime() {
   }
 }
 
-// 防抖监听筛选变化
-let timer = null
-watch(
-  () => ({ ...state }),
-  () => {
-    clearTimeout(timer)
-    timer = setTimeout(refresh, 350)
-  },
-  { deep: false },
-)
+// 筛选变更不再自动查询：只更新 state，由用户点「刷新」显式触发（dirty 会提示）。
+// 原先的 350ms 防抖 watch 已移除——连续调整多个筛选项时会被打断、无法改完再查。
 
 // 登录成功：保存令牌到 localStorage，关闭登录框并重载数据
 async function onLogin(token) {
@@ -303,6 +389,7 @@ async function onLogin(token) {
   await loadSites()
   if (site.value) saveSettings({ site: site.value })
   await loadChannelMap()
+  await loadSiteConf()
   refresh()
 }
 
@@ -311,11 +398,28 @@ function onLoginClose() {
   error.value = '未通过访问令牌验证，页面无法加载数据。刷新页面可重新登录。'
 }
 
+// 启动探测：logs 是否有 quota 列（自定义导出的表可能没有），缺失时金额一律按 0 处理，
+// 避免整条 KPI/维度查询因未知列 500。
+const hasQuota = ref(true)
+async function probeQuotaColumn() {
+  try {
+    const r = await chQuery(sql.columnProbeQuery('quota'))
+    const n = Number(r[0]?.n || 0)
+    hasQuota.value = n > 0
+    sql.setHasQuota(n > 0)
+    if (!n) console.warn('[board] logs 表无 quota 列，消费金额将显示为 -')
+  } catch { /* 探测失败：保持默认可查（乐观） */ }
+}
+
 onMounted(async () => {
   site.value = settings.site || ''
   await loadSites()
   if (site.value) saveSettings({ site: site.value })
   await loadChannelMap()
+  await loadSiteConf()
+  // 探测不阻塞首屏（数据源不通时探测要等满超时，会把首屏拖慢）；
+  // 常态下表里有 quota 列，探测结果与默认值一致，先发查询无副作用。
+  probeQuotaColumn()
   refresh()
 })
 </script>
@@ -333,7 +437,9 @@ onMounted(async () => {
         @change="site = $event; switchSite()"
         @add="onAddSite"
         @edit="onEditSite"
-        @delete="onDeleteSite" />
+        @delete="onDeleteSite"
+        @export="onExportSites"
+        @import="onImportSites" />
       <span v-if="loading"><span class="spin"></span>加载中</span>
     </div>
 
@@ -343,14 +449,17 @@ onMounted(async () => {
     </div>
 
     <FilterBar :state="state" :options="data.options" :channel-name="(id) => channelName(id) || 'ID ' + id"
-      @refresh="refresh" @all="applyAllTime" />
+      :dirty="dirty" @refresh="refresh" @all="applyAllTime" />
 
-    <KpiCards :kpi="data.kpi" :kpi-prev="data.kpiPrev" />
+    <KpiCards :kpi="data.kpi" :kpi-prev="data.kpiPrev"
+      :quota-per-unit="siteConf.quota_per_unit" :currency="siteConf.currency" :has-quota="hasQuota" />
 
     <TrendCharts :trend="data.trend" :gran="gran" />
 
     <div class="section-title">维度明细</div>
-    <DimTable :rows="data.dims" :group-by="state.groupBy" :dim-label="dimLabel" @drill="onDrill" />
+    <DimTable :rows="data.dims" :group-by="state.groupBy" :dim-label="dimLabel"
+      :quota-per-unit="siteConf.quota_per_unit" :currency="siteConf.currency" :has-quota="hasQuota"
+      @drill="onDrill" />
 
     <div class="section-title">报错分析</div>
     <ErrorPanel :dist="data.errDist" :list="data.errList" :channel-name="(id) => channelName(id) || 'ID ' + id" />

@@ -14,6 +14,19 @@ const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "
 // 非数字安全包装：无样本时输出 null（避免 CH 输出 NaN 破坏 JSON）
 const safe = (expr, guard) => `if((${guard}) = 0, null, ${expr})`
 
+// 金额列兼容开关：new-api 标准 logs 表有 quota（额度）列，但自定义导出的表可能没有。
+// 启动时用 columnProbeQuery 探测一次；缺失时金额一律返回 0，避免整条查询 500。
+let HAS_QUOTA = true
+export function setHasQuota(v) {
+  HAS_QUOTA = !!v
+}
+export function getHasQuota() {
+  return HAS_QUOTA
+}
+// quota 求和表达式（列缺失 → 常量 0，保持结果列结构一致）
+const quotaSum = () => (HAS_QUOTA ? 'sumIf(quota, ok)' : 'toInt64(0)')
+
+
 /**
  * 构建 request 级 CTE。f: { t0, t1, users, models, tokens, groups }
  * 渠道/Key 过滤在归并之后（外层）做，保证"最终归属"语义。
@@ -49,6 +62,7 @@ export function buildReqs(f) {
     argMaxIf(prompt_tokens, created_at, type = 2) AS prompt_tokens,
     argMaxIf(completion_tokens, created_at, type = 2) AS completion_tokens,
     argMaxIf(JSONExtractUInt(other, 'cache_tokens'), created_at, type = 2) AS cache_tokens,
+    ${HAS_QUOTA ? 'argMaxIf(quota, created_at, type = 2)' : 'toInt64(0)'} AS quota,
     argMaxIf(is_stream, created_at, type = 2) AS is_stream,
     argMaxIf(JSONExtractInt(other, 'admin_info', 'multi_key_index'), created_at, type = 2) AS key_idx,
     argMaxIf(length(JSONExtractArrayRaw(other, 'admin_info', 'use_channel')), created_at, type = 2) AS try_cnt,
@@ -93,7 +107,9 @@ SELECT
   sumIf(cache_tokens, ok) AS cache_tok,
   sumIf(prompt_tokens, ok) AS input_tok,
   sumIf(completion_tokens, ok) AS output_tok,
-  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok
+  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok,
+  -- 消费金额原始额度（quota）；前端按站点 quota_per_unit 换算为货币
+  ${quotaSum()} AS quota_sum
 FROM reqs
 ${outerWhere(f)}`
 }
@@ -152,7 +168,8 @@ SELECT
   sumIf(cache_tokens, ok) AS cache_tok,
   sumIf(prompt_tokens, ok) AS input_tok,
   sumIf(completion_tokens, ok) AS output_tok,
-  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok
+  sumIf(prompt_tokens + completion_tokens, ok) AS total_tok,
+  ${quotaSum()} AS quota_sum
 FROM reqs
 ${outerWhere(f)}
 GROUP BY dim ORDER BY total DESC`
@@ -217,4 +234,11 @@ WHERE type = 2 AND JSONHas(other, 'admin_info', 'multi_key_index')
 export function timeRangeQuery() {
   return `SELECT toString(min(created_at)) AS t0, toString(max(created_at)) AS t1
 FROM new_api_logs.logs WHERE type IN (2, 5)`
+}
+
+// ---------- 表结构探测 ----------
+// 用于启动时判断 logs 是否有某列（当前用于 quota 兼容）。
+export function columnProbeQuery(col) {
+  return `SELECT count() AS n FROM system.columns
+WHERE database = currentDatabase() AND table = 'logs' AND name = ${q(col)}`
 }

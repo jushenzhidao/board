@@ -27,8 +27,8 @@ const { renderToString } = await import('vue/server-renderer')
 const html = await renderToString(createApp())
 const checks = ${JSON.stringify([
   '渠道看板', '请求数', '成功率', 'FRT P95', 'TPS', '平均耗时', '缓存命中率',
-  '报错数', '分组依据', '维度明细', '报错分析', '报错分布', '热力图', '选择站点',
-  '渠道', 'Key', '用户', '模型', '令牌', '分组',
+  '报错数', '消费金额', 'Token 用量', '分组依据', '维度明细', '报错分析', '报错分布', '热力图', '选择站点',
+  '渠道', 'Key', '用户', '模型', '令牌', '分组', '刷新',
 ])}
 const missing = checks.filter((c) => !html.includes(c))
 console.log('SSR html length: ' + html.length)

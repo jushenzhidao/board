@@ -1,11 +1,14 @@
 <script setup>
-// KPI 指标卡 ×8（含环比）
+// KPI 指标卡（含环比）
 import { computed } from 'vue'
-import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum, deltaOf } from '../api/format.js'
+import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum, fmtMoney, deltaOf } from '../api/format.js'
 
 const props = defineProps({
   kpi: { type: Object, default: null },
   kpiPrev: { type: Object, default: null },
+  quotaPerUnit: { type: Number, default: 500000 }, // 1 货币单位 = 多少 quota
+  currency: { type: String, default: '$' },
+  hasQuota: { type: Boolean, default: true }, // 表里是否有 quota 列
 })
 
 const cards = computed(() => {
@@ -55,6 +58,20 @@ const cards = computed(() => {
       delta: sub(k.cache_rate, p.cache_rate, true),
     },
     {
+      label: '报错数',
+      value: fmtNum(k.err_cnt),
+      sub2: '最终失败请求',
+      delta: sub(k.err_cnt, p.err_cnt, false),
+    },
+    {
+      label: '消费金额',
+      value: props.hasQuota ? fmtMoney(k.quota_sum, props.quotaPerUnit, props.currency) : '-',
+      sub2: props.hasQuota
+        ? `额度 ${fmtNum(k.quota_sum)} · 1${props.currency} = ${fmtNum(props.quotaPerUnit)} quota`
+        : 'logs 表无 quota 列',
+      delta: props.hasQuota ? sub(k.quota_sum, p.quota_sum, false) : null, // 成本下降为好
+    },
+    {
       label: 'Token 用量',
       kind: 'tokens',
       value: fmtBigNum(k.total_tok),
@@ -65,12 +82,6 @@ const cards = computed(() => {
         { label: '输出', val: fmtBigNum(k.output_tok) },
         { label: '总', val: fmtBigNum(k.total_tok) },
       ],
-    },
-    {
-      label: '报错数',
-      value: fmtNum(k.err_cnt),
-      sub2: '最终失败请求',
-      delta: sub(k.err_cnt, p.err_cnt, false),
     },
   ]
 })

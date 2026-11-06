@@ -53,6 +53,7 @@ const TESTS = [
   ['options', sql.optionsQuery(f.t0, f.t1)],
   ['keyOptions', sql.keyOptionsQuery(f.t0, f.t1)],
   ['timeRange', sql.timeRangeQuery()],
+  ['columnProbe', sql.columnProbeQuery('quota')],
 ]
 
 let fail = 0

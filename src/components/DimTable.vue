@@ -1,12 +1,15 @@
 <script setup>
 // 维度明细表：按分组依据聚合，可排序，点击行下钻
 import { ref, computed } from 'vue'
-import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum } from '../api/format.js'
+import { fmtNum, fmtPct, fmtMs, fmtTps, fmtSec, fmtBigNum, fmtMoney } from '../api/format.js'
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
   groupBy: { type: String, default: 'channel' },
   dimLabel: { type: Function, required: true }, // dim原始值 -> 显示名
+  quotaPerUnit: { type: Number, default: 500000 }, // 1 货币单位 = 多少 quota
+  currency: { type: String, default: '$' },
+  hasQuota: { type: Boolean, default: true },
 })
 const emit = defineEmits(['drill'])
 
@@ -28,6 +31,11 @@ const COLS = [
   { key: 'input_tok', label: '输入 tok', fmt: (v) => fmtBigNum(v) },
   { key: 'output_tok', label: '输出 tok', fmt: (v) => fmtBigNum(v) },
   { key: 'total_tok', label: '总 tok', fmt: (v) => fmtBigNum(v) },
+  {
+    key: 'quota_sum',
+    label: '消费金额',
+    fmt: (v) => (props.hasQuota ? fmtMoney(v, props.quotaPerUnit, props.currency) : '-'),
+  },
 ]
 
 const sorted = computed(() => {

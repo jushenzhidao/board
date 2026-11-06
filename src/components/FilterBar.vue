@@ -8,8 +8,9 @@ const props = defineProps({
   state: { type: Object, required: true }, // {t0,t1,channels,keys,users,models,tokens,groups,groupBy}
   options: { type: Object, default: () => ({}) }, // {channels:[],models:[],users:[],tokens:[],groups:[],keys:[]}
   channelName: { type: Function, required: true }, // id -> name
+  dirty: { type: Boolean, default: false }, // 筛选已修改但未查询
 })
-const emit = defineEmits(['refresh'])
+const emit = defineEmits(['refresh', 'all'])
 
 const SHORTCUTS = [
   { label: '6h', hours: 6 },
@@ -114,7 +115,15 @@ function keyLabel(k) {
         </div>
       </div>
       <div class="spacer" style="flex: 1"></div>
-      <button class="primary" type="button" @click="emit('refresh')">刷新</button>
+      <span v-if="dirty" class="dirty-hint">筛选已修改，点击刷新应用</span>
+      <button class="primary" type="button" :class="{ attention: dirty }"
+        :title="dirty ? '筛选条件有改动，点击应用' : '重新查询'"
+        @click="emit('refresh')">刷新{{ dirty ? ' •' : '' }}</button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.dirty-hint { color: #b45309; font-size: 12px; margin-right: 10px; }
+button.primary.attention { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18); }
+</style>

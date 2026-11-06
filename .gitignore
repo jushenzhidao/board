@@ -22,6 +22,8 @@ __pycache__/
 
 # ---- 站点凭据（含 CH/MySQL 密码，绝不可入库）----
 config/sites.json
+config/sites.json.bak
+config/sites.json.tmp
 
 # ---- 运行时生成物（由 sync_channels.py / 桥接生成）----
 public/sites.json
